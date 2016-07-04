@@ -1,0 +1,13 @@
+- hosts: localhost
+  connection: local
+  gather_facts: no
+  vars_files:
+    - ./cloud_vars.yml
+    
+  tasks:
+    - name: Destroy the resource group
+      azure_rm_resourcegroup:
+        state: absent
+        force: yes
+        name: '{{ azure_resource_group }}'
+        location: '{{ azure_region }}'
