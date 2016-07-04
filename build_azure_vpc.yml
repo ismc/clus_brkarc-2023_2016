@@ -1,0 +1,303 @@
+- hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    csr_name: csr
+  vars_files:
+    - ./cloud_vars.yml
+    
+  tasks:
+    - name: Create a resource group
+      azure_rm_resourcegroup:
+        state: present
+        name: '{{ azure_resource_group }}'
+        location: '{{ azure_region }}'
+
+    - name: Create Azure Deploy
+      azure_rm_deployment:
+        wait_for_deployment_completion: no
+        state: present
+        location: '{{ azure_region }}'
+        resource_group_name: '{{ azure_resource_group }}'
+        template:
+          $schema: "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#"
+          contentVersion: "1.0.0.0"
+          parameters:
+            csr_networkSecurityGroup_name: 
+              defaultValue: "csr_security_group"
+              type: "String"
+            outside_RouteTable_name: 
+              defaultValue: "outside_route_table"
+              type: "String"
+            inside_RouteTable_name: 
+              defaultValue: "inside_route_table"
+              type: "String"
+            csr_virtualNetwork_name:
+              defaultValue: "csr_vnet"
+              type: "String"
+            csr_publicIPAddresses_name:          
+              defaultValue: "csr_public_ip_address"
+              type: "String"
+            csr_outside_networkInterface_name:
+              defaultValue: "csr_outside_interface"
+              type: "String"
+            csr_inside_networkInterface_name:
+              defaultValue: "csr_inside_interface"
+              type: "String"
+            csr_virtualMachine_name:
+              defaultValue: "{{ csr_name }}"
+              type: "String"
+            csr_virtualMachine_adminPassword:
+              defaultValue: "C!sc0123"
+              type: "String"
+            azure_resource_group:
+              defaultValue: '{{ azure_resource_group }}'
+              type: "String"
+            storageAccountName:
+              defaultValue: "stevencacsrstorage"
+              type: "string"
+              metadata:
+                description: "Unique DNS Name for the Storage Account where the Virtual Machine's disks will be placed."
+          variables:
+            location: '{{ azure_region }}'
+            storageAccountType: "Standard_LRS"
+            csr_osDisk_uri: "[concat('http://',parameters('storageAccountName'),'.blob.core.windows.net/vhds/',parameters('csr_virtualMachine_name'),'.vhd')]"
+          resources:
+            -
+              type: "Microsoft.Storage/storageAccounts"
+              name: "[parameters('storageAccountName')]"
+              apiVersion: "2015-05-01-preview"
+              location: "[variables('location')]"
+              properties:
+                accountType: "[variables('storageAccountType')]"
+            - 
+              comments: "Create Security Group"
+              type: "Microsoft.Network/networkSecurityGroups"
+              name: "[parameters('csr_networkSecurityGroup_name')]"
+              apiVersion: "2016-03-30"
+              location: "[variables('location')]"
+              properties: 
+                securityRules: 
+                  - 
+                    name: "SSH-Rule"
+                    properties: 
+                      description: "Allow SSH"
+                      protocol: "Tcp"
+                      sourcePortRange: "*"
+                      destinationPortRange: "22"
+                      sourceAddressPrefix: "Internet"
+                      destinationAddressPrefix: "*"
+                      access: "Allow"
+                      priority: 100
+                      direction: "Inbound"
+                  - 
+                    name: "UDP-Rule1"
+                    properties: 
+                      description: "Allow UDP"
+                      protocol: "UDP"
+                      sourcePortRange: "*"
+                      destinationPortRange: "500"
+                      sourceAddressPrefix: "Internet"
+                      destinationAddressPrefix: "*"
+                      access: "Allow"
+                      priority: 101
+                      direction: "Inbound"
+                  - 
+                    name: "UDP-Rule2"
+                    properties: 
+                      description: "Allow UDP"
+                      protocol: "UDP"
+                      sourcePortRange: "*"
+                      destinationPortRange: "4500"
+                      sourceAddressPrefix: "Internet"
+                      destinationAddressPrefix: "*"
+                      access: "Allow"
+                      priority: 102
+                      direction: "Inbound"
+              dependsOn: []
+            - 
+              comments: "Allocate Public IP Address"
+              type: "Microsoft.Network/publicIPAddresses"
+              name: "[parameters('csr_publicIPAddresses_name')]"
+              apiVersion: "2016-03-30"
+              location: "[variables('location')]"
+              properties: 
+                publicIPAllocationMethod: "Dynamic"
+                idleTimeoutInMinutes: 4
+              dependsOn: []
+            - 
+              comments: "Create Outside Route Table"
+              type: "Microsoft.Network/routeTables"
+              name: "[parameters('outside_RouteTable_name')]"
+              apiVersion: "2016-03-30"
+              location: "[variables('location')]"
+              properties: 
+                routes: 
+                  - 
+                    name: "Route-Inside_Subnet-To-CSR"
+                    properties: 
+                      addressPrefix: "10.7.1.0/24"
+                      nextHopType: "VirtualAppliance"
+                      nextHopIpAddress: "10.7.0.4"
+              dependsOn: []
+            - 
+              comments: "Create Inside Route Table"
+              type: "Microsoft.Network/routeTables"
+              name: "[parameters('inside_RouteTable_name')]"
+              apiVersion: "2016-03-30"
+              location: "[variables('location')]"
+              properties: 
+                routes: 
+                  - 
+                    name: "Route-Outside_Subnet-To-CSR"
+                    properties: 
+                      addressPrefix: "10.7.0.0/24"
+                      nextHopType: "VirtualAppliance"
+                      nextHopIpAddress: "10.7.1.4"
+                  - 
+                    name: "Default-Route-To-CSR"
+                    properties: 
+                      addressPrefix: "0.0.0.0/0"
+                      nextHopType: "VirtualAppliance"
+                      nextHopIpAddress: "10.7.1.4"
+              dependsOn: []
+            - 
+              comments: "Generalized from resource: '/subscriptions/025bfe8c-a09b-4e2e-ac1b-7a9257e14563/resourceGroups/CSR/providers/Microsoft.Network/virtualNetworks/vnet01'."
+              type: "Microsoft.Network/virtualNetworks"
+              name: "[parameters('csr_virtualNetwork_name')]"
+              apiVersion: "2016-03-30"
+              location: "[variables('location')]"
+              properties: 
+                addressSpace: 
+                  addressPrefixes: 
+                    - "10.7.0.0/16"
+                subnets: 
+                  - 
+                    name: "subnet1"
+                    properties: 
+                      addressPrefix: "10.7.0.0/24"
+                      routeTable: 
+                        id: "[resourceId('Microsoft.Network/routeTables', parameters('outside_RouteTable_name'))]"
+                  - 
+                    name: "subnet2"
+                    properties: 
+                      addressPrefix: "10.7.1.0/24"
+                      routeTable: 
+                        id: "[resourceId('Microsoft.Network/routeTables', parameters('inside_RouteTable_name'))]"
+              dependsOn: 
+                - "[resourceId('Microsoft.Network/routeTables', parameters('outside_RouteTable_name'))]"
+                - "[resourceId('Microsoft.Network/routeTables', parameters('inside_RouteTable_name'))]"
+            - 
+              comments: "Create CSR's Outside Interface"
+              type: "Microsoft.Network/networkInterfaces"
+              name: "[parameters('csr_outside_networkInterface_name')]"
+              apiVersion: "2016-03-30"
+              location: "[variables('location')]"
+              properties: 
+                ipConfigurations: 
+                  - 
+                    name: "ipconfig1"
+                    properties: 
+                      privateIPAddress: "10.7.0.4"
+                      privateIPAllocationMethod: "Static"
+                      publicIPAddress: 
+                        id: "[resourceId('Microsoft.Network/publicIPAddresses', parameters('csr_publicIPAddresses_name'))]"
+                      subnet: 
+                        id: "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('csr_virtualNetwork_name')), '/subnets/subnet1')]"
+                dnsSettings: 
+                  dnsServers: []
+                enableIPForwarding: true
+                networkSecurityGroup: 
+                  id: "[resourceId('Microsoft.Network/networkSecurityGroups', parameters('csr_networkSecurityGroup_name'))]"
+              dependsOn: 
+                - "[resourceId('Microsoft.Network/publicIPAddresses', parameters('csr_publicIPAddresses_name'))]"
+                - "[resourceId('Microsoft.Network/virtualNetworks', parameters('csr_virtualNetwork_name'))]"
+                - "[resourceId('Microsoft.Network/networkSecurityGroups', parameters('csr_networkSecurityGroup_name'))]"
+            - 
+              comments: "Generalized from resource: '/subscriptions/025bfe8c-a09b-4e2e-ac1b-7a9257e14563/resourceGroups/CSR/providers/Microsoft.Network/networkInterfaces/stevenca-csr-Nic1'."
+              type: "Microsoft.Network/networkInterfaces"
+              name: "[parameters('csr_inside_networkInterface_name')]"
+              apiVersion: "2016-03-30"
+              location: "[variables('location')]"
+              properties: 
+                ipConfigurations: 
+                  - 
+                    name: "ipconfig1"
+                    properties: 
+                      privateIPAddress: "10.7.1.4"
+                      privateIPAllocationMethod: "Static"
+                      subnet: 
+                        id: "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('csr_virtualNetwork_name')), '/subnets/subnet2')]"
+                dnsSettings: 
+                  dnsServers: []
+                enableIPForwarding: true
+              dependsOn: 
+                - "[resourceId('Microsoft.Network/virtualNetworks', parameters('csr_virtualNetwork_name'))]"
+            - 
+              comments: "Create CSR"
+              type: "Microsoft.Compute/virtualMachines"
+              name: "[parameters('csr_virtualMachine_name')]"
+              apiVersion: "2015-06-15"
+              location: "[variables('location')]"
+              plan: 
+                name: "csr-azure-byol"
+                product: "cisco-csr-1000v"
+                publisher: "cisco"
+              properties: 
+                hardwareProfile: 
+                  vmSize: "Standard_D2"
+                storageProfile: 
+                  imageReference: 
+                    publisher: "cisco"
+                    offer: "cisco-csr-1000v"
+                    sku: "csr-azure-byol"
+                    version: "latest"
+                  osDisk: 
+                    name: "[concat(parameters('csr_virtualMachine_name'),'-disk')]"
+                    createOption: "FromImage"
+                    vhd: 
+                      uri: "[variables('csr_osDisk_uri')]"
+                    caching: "ReadWrite"
+                  dataDisks: []
+                osProfile: 
+                  computerName: "[parameters('csr_virtualMachine_name')]"
+                  adminUsername: "azureuser"
+                  linuxConfiguration: 
+                    disablePasswordAuthentication: true
+                    ssh: 
+                      publicKeys: 
+                        - 
+                          path: "/home/azureuser/.ssh/authorized_keys"
+                          keyData: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDee85cMNTL6ugFxK4u6geSmjDjZwHPbBDv+hzLSeZGCF9zBVypxcSkkmvJAnOYXNenc4wgvjAQYYh1TrfyEYPNA4dsu4RS6g40K+86KNcfKZl6qUeyE/bphdnkHuJKKysIB8WIm+Pz7lyL9P6bskSaT4dTlcVa9o8ExKAm+E/Zf0PV68lWDvFH/gjZSgy/yuYlyN9cv6X3eiGPOoBTE0cvXxECXBmOTd8SL/pADO0a/7q9
+af75i6hsf6Oon8317AwWwCX/X7hYmYa4awnosEzPA+u2gf+4irPEwBiOdeaJ81+JXPHGq5d+25mGNuFmtxIaSNZ/4HZLlpxVKN939ZZ9 stevenca@stevenca-login"
+                  secrets: []
+                  adminPassword: "[parameters('csr_virtualMachine_adminPassword')]"
+                networkProfile: 
+                  networkInterfaces: 
+                    - 
+                      properties: 
+                        primary: true
+                      id: "[resourceId('Microsoft.Network/networkInterfaces', parameters('csr_outside_networkInterface_name'))]"
+                    - 
+                      properties: 
+                        primary: false
+                      id: "[resourceId('Microsoft.Network/networkInterfaces', parameters('csr_inside_networkInterface_name'))]"
+              dependsOn: 
+                - "[resourceId('Microsoft.Network/networkInterfaces', parameters('csr_outside_networkInterface_name'))]"
+                - "[resourceId('Microsoft.Network/networkInterfaces', parameters('csr_inside_networkInterface_name'))]"
+
+    - name: Get The CSR's Public IP Address
+      shell: azure network public-ip list | awk '/csr_public_ip_address/ {print $7}'
+      args:
+        executable: /bin/bash
+      register: azure_network_public_ip_list
+
+    - name: Set The CSR's Public IP Address
+      set_fact: csr_public_ip_address="{{ azure_network_public_ip_list.stdout }}"
+
+    - name: Add instance to local host group
+      local_action: lineinfile dest=hosts regexp="{{ csr_public_ip_address }}" insertafter="\[spokes\]" line="{{ csr_public_ip_address }} name={{ csr_name }}_csr" state=present
+      when: csr_public_ip_address != "none"       
+
+    - name: Waiting for CSR to finish booting
+      local_action: wait_for port=22 host="{{ csr_public_ip_address }}" timeout=600

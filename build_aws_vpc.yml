@@ -1,0 +1,193 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    aws_region: us-west-1
+    csr_ami: ami-4bf7842b
+    vpc_cidr: 10.5.0.0/16
+    inside_subnet_cidr: 10.5.1.0/24
+    csr_inside_ip: 10.5.1.254
+    csr_inside_subnet: 255.255.255.0
+    outside_subnet_cidr: 10.5.0.0/24
+    login_ip: 10.5.1.10
+
+  tasks:
+    - name: Create VPC
+      ec2_vpc:
+        state: present
+        cidr_block: '{{ vpc_cidr }}'
+        resource_tags:
+          Name: stevenca-vpc
+          Owner: stevenca
+          Environment: Ansible_Test
+        region: '{{ aws_region }}'
+        dns_hostnames: no
+        dns_support: yes
+        instance_tenancy: default
+        internet_gateway: True
+      register: vpc
+
+    - name: Create Security Group
+      ec2_group:
+        name: csr_security_group
+        description: an example EC2 group
+        vpc_id: '{{ vpc.vpc_id }}'
+        region: '{{ aws_region }}'
+        rules:
+          - proto: tcp
+            from_port: 22
+            to_port: 22
+            cidr_ip: 0.0.0.0/0
+          - proto: tcp
+            from_port: 8022
+            to_port: 8022
+            cidr_ip: 0.0.0.0/0
+          - proto: icmp
+            from_port: 8 # icmp type, -1 = any type
+            to_port:  -1 # icmp subtype, -1 = any subtype
+            cidr_ip: 0.0.0.0/0
+      register: csr_security_group
+
+    - name: Create outside subnet
+      ec2_vpc_subnet:
+        state: present
+        vpc_id: '{{ vpc.vpc_id }}'
+        cidr: '{{ outside_subnet_cidr }}'
+        region: '{{ aws_region }}'
+        az: "{{ aws_region }}b"
+        resource_tags:
+          Name: Outside (10.5.0.0/24)
+          Owner: stevenca
+          Environment: Ansible_Test
+      register: outside_subnet
+
+    - name: Set up outside subnet route table
+      ec2_vpc_route_table:
+        vpc_id: '{{ vpc.vpc_id }}'
+        region: '{{ aws_region }}'
+        tags:
+          Name: CSR (Public)
+          Owner: stevenca
+          Environment: Ansible_Test
+        subnets:
+          - '{{ outside_subnet.subnet.id }}'
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ vpc.igw_id }}"
+      register: public_route_table
+      when: outside_subnet.changed
+
+    - name: Create CSR instance
+      ec2:
+        key_name: STEVENCA-M-202D
+        region: '{{ aws_region }}'
+        instance_type: m3.medium
+        instance_tags:
+          Name: CSR (stevenca-vpc)
+          Owner: stevenca
+          Environment: Ansible_Test
+          Role: router
+        image: '{{ csr_ami }}'
+        group_id: '{{ csr_security_group.group_id }}'
+        wait: yes
+        exact_count: 1
+        count_tag:
+          - Role: router
+        vpc_subnet_id: '{{ outside_subnet.subnet.id }}'
+        assign_public_ip: yes
+      register: csr
+
+    - name: Set the fact for CSR Instance variable
+      set_fact: csr_instance_id="{{ item.id }}"
+      with_items: "{{ csr.tagged_instances }}"
+      when: csr.tagged_instances is defined
+      
+    - name: Set the fact for CSR Instance variable
+      set_fact: csr_public_ip="{{ item.public_ip }}"
+      with_items: "{{ csr.tagged_instances }}"
+      when: csr.tagged_instances is defined
+
+    - name: Create Inside subnet
+      ec2_vpc_subnet:
+        state: present
+        vpc_id: '{{ vpc.vpc_id }}'
+        cidr: '{{ inside_subnet_cidr }}'
+        region: '{{ aws_region }}'
+        az: "{{ aws_region }}b"
+        resource_tags:
+          Name: Inside (10.5.1.0/24)
+          Owner: stevenca
+          Environment: Ansible_Test
+      register: inside_subnet
+    
+    - name: Create CSR's inside interface            
+      ec2_eni:
+        instance_id: '{{ csr_instance_id }}'
+        region: '{{ aws_region }}'
+        device_index: 1
+        private_ip_address: 10.5.1.254
+        subnet_id: '{{ inside_subnet.subnet.id }}'
+        state: present
+        delete_on_termination: true
+        source_dest_check: disabled
+        security_groups: '{{ csr_security_group.group_id }}'
+      register: csr_inside_interface
+      when: csr.changed
+
+    - name: Set up inside subnet route table
+      ec2_vpc_route_table:
+        vpc_id: '{{ vpc.vpc_id }}'
+        region: '{{ aws_region }}'
+        tags:
+          Name: CSR (Private)
+          Owner: stevenca
+          Environment: Ansible_Test
+        subnets:
+          - '{{ inside_subnet.subnet.id }}'
+        routes:
+          - dest: 0.0.0.0/0
+            interface_id: '{{ csr_inside_interface.interface.id }}'
+      register: private_route_table       
+      when: csr_inside_interface.changed
+
+    - name: Create login instance
+      ec2:
+        key_name: STEVENCA-M-202D
+        region: '{{ aws_region }}'
+        instance_type: t2.micro
+        instance_tags:
+          Name: Login (stevenca-vpc)
+          Owner: stevenca
+          Environment: Ansible_Test
+          Role: login
+        image: ami-d1315fb1
+        group_id: '{{ csr_security_group.group_id }}'
+        exact_count: 1
+        count_tag:
+          - Role: login
+        wait: yes
+        vpc_subnet_id: '{{ inside_subnet.subnet.id }}'
+        private_ip: 10.5.1.10
+        assign_public_ip: no
+      register: login_server
+      
+    - name: Initital CSR Configuration
+      ios_template:
+        src: csr_initial.j2
+        username: ec2-user
+        ssh_keyfile: /home/stevenca/aws/STEVENCA-M-202D
+        host: '{{ csr_public_ip }}'
+      notify:
+        - write config
+
+  handlers:
+    - name: write config
+      ios_command:
+        commands: write
+        username: ec2-user
+        ssh_keyfile: /home/stevenca/aws/STEVENCA-M-202D
+        host: '{{ csr_public_ip }}'
+  
+      
+    - debug: var=hostvars[inventory_hostname]
