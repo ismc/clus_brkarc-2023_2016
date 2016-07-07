@@ -268,8 +268,7 @@
                       publicKeys: 
                         - 
                           path: "/home/azureuser/.ssh/authorized_keys"
-                          keyData: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDee85cMNTL6ugFxK4u6geSmjDjZwHPbBDv+hzLSeZGCF9zBVypxcSkkmvJAnOYXNenc4wgvjAQYYh1TrfyEYPNA4dsu4RS6g40K+86KNcfKZl6qUeyE/bphdnkHuJKKysIB8WIm+Pz7lyL9P6bskSaT4dTlcVa9o8ExKAm+E/Zf0PV68lWDvFH/gjZSgy/yuYlyN9cv6X3eiGPOoBTE0cvXxECXBmOTd8SL/pADO0a/7q9
-af75i6hsf6Oon8317AwWwCX/X7hYmYa4awnosEzPA+u2gf+4irPEwBiOdeaJ81+JXPHGq5d+25mGNuFmtxIaSNZ/4HZLlpxVKN939ZZ9 stevenca@stevenca-login"
+                          keyData: "{{ ssh_public_key }}"
                   secrets: []
                   adminPassword: "[parameters('csr_virtualMachine_adminPassword')]"
                 networkProfile: 
@@ -296,7 +295,7 @@ af75i6hsf6Oon8317AwWwCX/X7hYmYa4awnosEzPA+u2gf+4irPEwBiOdeaJ81+JXPHGq5d+25mGNuFm
       set_fact: csr_public_ip_address="{{ azure_network_public_ip_list.stdout }}"
 
     - name: Add instance to local host group
-      local_action: lineinfile dest=hosts regexp="{{ csr_public_ip_address }}" insertafter="\[spokes\]" line="{{ csr_public_ip_address }} name={{ csr_name }}_csr" state=present
+      local_action: lineinfile dest=hosts regexp="{{ csr_name }}" insertafter="\[spokes\]" line="{{ csr_public_ip_address }} name={{ csr_name }}_csr" state=present
       when: csr_public_ip_address != "none"       
 
     - name: Waiting for CSR to finish booting
