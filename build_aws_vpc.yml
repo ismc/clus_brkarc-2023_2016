@@ -1,26 +1,26 @@
 ---
 - hosts: localhost
   connection: local
-  gather_facts: yes
-  vars:
-    aws_region: us-west-1
-    csr_ami: ami-4bf7842b
-    vpc_cidr: 10.5.0.0/16
-    inside_subnet_cidr: 10.5.1.0/24
-    csr_inside_ip: 10.5.1.254
-    csr_inside_subnet: 255.255.255.0
-    outside_subnet_cidr: 10.5.0.0/24
-    login_ip: 10.5.1.10
+  vars_files:
+    - ./cloud_vars.yml
+  
 
   tasks:
+    - name: example2 ec2 key
+      ec2_key:
+        name: '{{ cloud_tag }}_key'
+        region: '{{ aws_region }}'
+        key_material: '{{ ssh_public_key }}'
+        state: present
+
     - name: Create VPC
       ec2_vpc:
         state: present
-        cidr_block: '{{ vpc_cidr }}'
+        cidr_block: '{{ aws_vpc_cidr }}'
         resource_tags:
-          Name: stevenca-vpc
+          Name: '{{ cloud_tag }}'
           Owner: stevenca
-          Environment: Ansible_Test
+          Environment: '{{ cloud_tag }}'
         region: '{{ aws_region }}'
         dns_hostnames: no
         dns_support: yes
@@ -43,6 +43,14 @@
             from_port: 8022
             to_port: 8022
             cidr_ip: 0.0.0.0/0
+          - proto: udp
+            from_port: 500
+            to_port: 500
+            cidr_ip: 0.0.0.0/0
+          - proto: udp
+            from_port: 4500
+            to_port: 4500
+            cidr_ip: 0.0.0.0/0                         
           - proto: icmp
             from_port: 8 # icmp type, -1 = any type
             to_port:  -1 # icmp subtype, -1 = any subtype
@@ -53,13 +61,13 @@
       ec2_vpc_subnet:
         state: present
         vpc_id: '{{ vpc.vpc_id }}'
-        cidr: '{{ outside_subnet_cidr }}'
+        cidr: '{{ aws_outside_subnet_cidr }}'
         region: '{{ aws_region }}'
         az: "{{ aws_region }}b"
         resource_tags:
           Name: Outside (10.5.0.0/24)
           Owner: stevenca
-          Environment: Ansible_Test
+          Environment: '{{ cloud_tag }}'
       register: outside_subnet
 
     - name: Set up outside subnet route table
@@ -69,7 +77,7 @@
         tags:
           Name: CSR (Public)
           Owner: stevenca
-          Environment: Ansible_Test
+          Environment: '{{ cloud_tag }}'
         subnets:
           - '{{ outside_subnet.subnet.id }}'
         routes:
@@ -80,45 +88,53 @@
 
     - name: Create CSR instance
       ec2:
-        key_name: STEVENCA-M-202D
+        key_name: '{{ cloud_tag }}_key'
         region: '{{ aws_region }}'
         instance_type: m3.medium
         instance_tags:
-          Name: CSR (stevenca-vpc)
+          Name: '{{ cloud_tag }}_csr'
           Owner: stevenca
-          Environment: Ansible_Test
-          Role: router
-        image: '{{ csr_ami }}'
+          Environment: '{{ cloud_tag }}'
+          Role: '{{ cloud_tag }}_csr'
+        image: '{{ aws_csr_ami }}'
         group_id: '{{ csr_security_group.group_id }}'
         wait: yes
         exact_count: 1
         count_tag:
-          - Role: router
+          - Role: '{{ cloud_tag }}_csr'
         vpc_subnet_id: '{{ outside_subnet.subnet.id }}'
         assign_public_ip: yes
       register: csr
 
-    - name: Set the fact for CSR Instance variable
-      set_fact: csr_instance_id="{{ item.id }}"
-      with_items: "{{ csr.tagged_instances }}"
-      when: csr.tagged_instances is defined
-      
-    - name: Set the fact for CSR Instance variable
-      set_fact: csr_public_ip="{{ item.public_ip }}"
-      with_items: "{{ csr.tagged_instances }}"
-      when: csr.tagged_instances is defined
+#    - debug: var=hostvars[inventory_hostname]
+
+    - name: Get the CSR's Instance ID
+      set_fact:
+        csr_instance_id: '{{ hostvars[inventory_hostname]["csr"]["tagged_instances"][0].id if hostvars[inventory_hostname]["csr"]["tagged_instances"][0] is defined else "none" }}'
+
+    - name: Get the CSR's Private IP Address
+      set_fact:
+        csr_outside_private_ip: '{{ hostvars[inventory_hostname]["csr"]["tagged_instances"][0].private_ip if hostvars[inventory_hostname]["csr"]["tagged_instances"][0] is defined else "none" }}'
+
+    - name: Get the CSR's Public IP Address
+      set_fact:
+        csr_outside_public_ip: '{{ hostvars[inventory_hostname]["csr"]["tagged_instances"][0].public_ip if hostvars[inventory_hostname]["csr"]["tagged_instances"][0] is defined else "none" }}'
+
+    - name: Add CSR to local host group
+      local_action: lineinfile dest=hosts regexp="{{ csr_outside_public_ip }}" insertafter="\[spokes\]" line="{{ csr_outside_public_ip }} csr_outside_private_ip={{ csr_outside_private_ip }} instance_id={{ csr_instance_id }}" state=present
+      when: csr_outside_public_ip != "none"
 
     - name: Create Inside subnet
       ec2_vpc_subnet:
         state: present
         vpc_id: '{{ vpc.vpc_id }}'
-        cidr: '{{ inside_subnet_cidr }}'
+        cidr: '{{ aws_inside_subnet_cidr }}'
         region: '{{ aws_region }}'
         az: "{{ aws_region }}b"
         resource_tags:
           Name: Inside (10.5.1.0/24)
           Owner: stevenca
-          Environment: Ansible_Test
+          Environment: '{{ cloud_tag }}'
       register: inside_subnet
     
     - name: Create CSR's inside interface            
@@ -142,7 +158,7 @@
         tags:
           Name: CSR (Private)
           Owner: stevenca
-          Environment: Ansible_Test
+          Environment: '{{ cloud_tag }}'
         subnets:
           - '{{ inside_subnet.subnet.id }}'
         routes:
@@ -153,41 +169,29 @@
 
     - name: Create login instance
       ec2:
-        key_name: STEVENCA-M-202D
+        key_name: '{{ cloud_tag }}_key'
         region: '{{ aws_region }}'
         instance_type: t2.micro
         instance_tags:
-          Name: Login (stevenca-vpc)
+          Name: '{{ cloud_tag }}_login'
           Owner: stevenca
-          Environment: Ansible_Test
-          Role: login
+          Environment: '{{ cloud_tag }}'
+          Role: '{{ cloud_tag }}_login'
         image: ami-d1315fb1
         group_id: '{{ csr_security_group.group_id }}'
         exact_count: 1
         count_tag:
-          - Role: login
+          - Role: '{{ cloud_tag }}_login'
         wait: yes
         vpc_subnet_id: '{{ inside_subnet.subnet.id }}'
         private_ip: 10.5.1.10
         assign_public_ip: no
       register: login_server
-      
-    - name: Initital CSR Configuration
-      ios_template:
-        src: csr_initial.j2
-        username: ec2-user
-        ssh_keyfile: /home/stevenca/aws/STEVENCA-M-202D
-        host: '{{ csr_public_ip }}'
-      notify:
-        - write config
 
-  handlers:
-    - name: write config
-      ios_command:
-        commands: write
-        username: ec2-user
-        ssh_keyfile: /home/stevenca/aws/STEVENCA-M-202D
-        host: '{{ csr_public_ip }}'
-  
+    - name: Add Login Server to local host group
+      local_action: lineinfile dest=hosts regexp="{{ hostvars[inventory_hostname]["login_server"]["tagged_instances"][0].private_ip }}" insertafter="\[hosts\]" line="{{ hostvars[inventory_hostname]["login_server"]["tagged_instances"][0].private_ip }} instance_id={{ hostvars[inventory_hostname]["login_server"]["tagged_instances"][0].id }}" state=present
+      when: csr_outside_public_ip != "none"
+
       
-    - debug: var=hostvars[inventory_hostname]
+
+#    - debug: var=hostvars[inventory_hostname]
