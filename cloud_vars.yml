@@ -12,6 +12,9 @@ cloud_info:
   aws:
     region: us-west-1
     csr_ami: ami-4bf7842b
+    csr_type: m3.medium
+    login_ami: ami-d1315fb1
+    login_type: t2.micro
     vpc_cidr: 10.5.0.0/16
     outside_cidr: 10.5.0.0/24
     inside_cidr: 10.5.1.0/24

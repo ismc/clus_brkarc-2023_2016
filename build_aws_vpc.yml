@@ -88,7 +88,7 @@
       ec2:
         key_name: '{{ cloud_tag }}_key'
         region: '{{ cloud_info["aws"].region }}'
-        instance_type: m3.medium
+        instance_type: '{{ cloud_info["aws"].csr_type }}'
         instance_tags:
           Name: '{{ cloud_tag }}_csr'
           Environment: '{{ cloud_tag }}'
@@ -154,8 +154,6 @@
       register: csr_inside_interface
       when: hostvars[inventory_hostname]["csr_inside_interface_facts"]["interfaces"][0] is not defined
 
-#    - debug: var=hostvars[inventory_hostname]
-
     - name: Set the CSR inside interface ID
       set_fact:
         csr_inside_eni: '{{ hostvars[inventory_hostname]["csr_inside_interface"]["interface"].id if csr_inside_interface.changed else hostvars[inventory_hostname]["csr_inside_interface_facts"]["interfaces"][0].id }}'
@@ -187,12 +185,12 @@
       ec2:
         key_name: '{{ cloud_tag }}_key'
         region: '{{ cloud_info["aws"].region }}'
-        instance_type: t2.micro
+        instance_type: '{{ cloud_info["aws"].login_ami }}'
         instance_tags:
           Name: '{{ cloud_tag }}_login'
           Environment: '{{ cloud_tag }}'
           Role: '{{ cloud_tag }}_login'
-        image: ami-d1315fb1
+        image: '{{ cloud_info["aws"].login_ami }}'
         group_id: '{{ csr_security_group.group_id }}'
         exact_count: 1
         count_tag:

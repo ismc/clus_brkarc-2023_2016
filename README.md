@@ -44,3 +44,11 @@ npm install azure-cli -g
 ```
 
 2) Update "cloud_vars.yml" with regions, amis, ssh-keys, etc.
+
+### Running the Playbooks:
+
+```
+ansible-playbook build_aws_vpc.yml
+
+ansible-playbook -i hosts destroy_aws_vpc.yml
+```
