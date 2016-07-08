@@ -136,9 +136,9 @@
                   - 
                     name: "Route-Inside_Subnet-To-CSR"
                     properties: 
-                      addressPrefix: "10.7.1.0/24"
+                      addressPrefix: '{{ cloud_info["azure"].inside_cidr }}'
                       nextHopType: "VirtualAppliance"
-                      nextHopIpAddress: "10.7.0.4"
+                      nextHopIpAddress: '{{ cloud_info["azure"].csr_outside_ip }}'
               dependsOn: []
             - 
               comments: "Create Inside Route Table"
@@ -151,15 +151,15 @@
                   - 
                     name: "Route-Outside_Subnet-To-CSR"
                     properties: 
-                      addressPrefix: "10.7.0.0/24"
+                      addressPrefix: '{{ cloud_info["azure"].outside_cidr }}'
                       nextHopType: "VirtualAppliance"
-                      nextHopIpAddress: "10.7.1.4"
+                      nextHopIpAddress: '{{ cloud_info["azure"].csr_inside_ip }}'
                   - 
                     name: "Default-Route-To-CSR"
                     properties: 
                       addressPrefix: "0.0.0.0/0"
                       nextHopType: "VirtualAppliance"
-                      nextHopIpAddress: "10.7.1.4"
+                      nextHopIpAddress: '{{ cloud_info["azure"].csr_inside_ip }}'
               dependsOn: []
             - 
               comments: "Generalized from resource: '/subscriptions/025bfe8c-a09b-4e2e-ac1b-7a9257e14563/resourceGroups/CSR/providers/Microsoft.Network/virtualNetworks/vnet01'."
@@ -170,18 +170,18 @@
               properties: 
                 addressSpace: 
                   addressPrefixes: 
-                    - "10.7.0.0/16"
+                    - '{{ cloud_info["azure"].vpc_cidr }}'
                 subnets: 
                   - 
                     name: "subnet1"
                     properties: 
-                      addressPrefix: "10.7.0.0/24"
+                      addressPrefix: '{{ cloud_info["azure"].outside_cidr }}'
                       routeTable: 
                         id: "[resourceId('Microsoft.Network/routeTables', parameters('outside_RouteTable_name'))]"
                   - 
                     name: "subnet2"
                     properties: 
-                      addressPrefix: "10.7.1.0/24"
+                      addressPrefix: '{{ cloud_info["azure"].inside_cidr }}'
                       routeTable: 
                         id: "[resourceId('Microsoft.Network/routeTables', parameters('inside_RouteTable_name'))]"
               dependsOn: 
@@ -198,7 +198,7 @@
                   - 
                     name: "ipconfig1"
                     properties: 
-                      privateIPAddress: "10.7.0.4"
+                      privateIPAddress: '{{ cloud_info["azure"].csr_outside_ip }}'
                       privateIPAllocationMethod: "Static"
                       publicIPAddress: 
                         id: "[resourceId('Microsoft.Network/publicIPAddresses', parameters('csr_publicIPAddresses_name'))]"
@@ -224,7 +224,7 @@
                   - 
                     name: "ipconfig1"
                     properties: 
-                      privateIPAddress: "10.7.1.4"
+                      privateIPAddress: '{{ cloud_info["azure"].csr_inside_ip }}'
                       privateIPAllocationMethod: "Static"
                       subnet: 
                         id: "[concat(resourceId('Microsoft.Network/virtualNetworks', parameters('csr_virtualNetwork_name')), '/subnets/subnet2')]"
@@ -285,8 +285,9 @@
                 - "[resourceId('Microsoft.Network/networkInterfaces', parameters('csr_outside_networkInterface_name'))]"
                 - "[resourceId('Microsoft.Network/networkInterfaces', parameters('csr_inside_networkInterface_name'))]"
 
+    # Getting the IP address through the modules was not reliable, so resorting to the cli
     - name: Get The CSR's Public IP Address
-      shell: azure network public-ip list | awk '/csr_public_ip_address/ {print $7}'
+      shell: azure network public-ip list | awk '/csr_public_ip_address/ {print $8}'
       args:
         executable: /bin/bash
       register: azure_network_public_ip_list
@@ -295,7 +296,7 @@
       set_fact: csr_public_ip_address="{{ azure_network_public_ip_list.stdout }}"
 
     - name: Add instance to local host group
-      local_action: lineinfile dest=hosts regexp="{{ csr_name }}" insertafter="\[spokes\]" line="{{ csr_public_ip_address }} name={{ csr_name }}_csr" state=present
+      local_action: lineinfile dest=hosts regexp="{{ csr_name }}" insertafter="\[spokes\]" line="{{ csr_public_ip_address }} name={{ csr_name }}_csr cloud=azure" state=present
       when: csr_public_ip_address != "none"       
 
     - name: Waiting for CSR to finish booting

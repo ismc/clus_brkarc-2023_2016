@@ -1,47 +1,45 @@
 ---
+- hosts: hubs:hosts 
+  gather_facts: no
+  connection: local
+  vars_files:
+    - ./cloud_vars.yml
+    
+  tasks:
+    - name: Terminate instances that were previously launched
+      os_server:
+        state: absent
+        name: '{{ name }}'
+      when: cloud == 'openstack'
+    
+    - name: Remove instance from the host file
+      local_action: lineinfile dest=hosts regexp="{{ name }}" state=absent
+      when: cloud == 'openstack'
+
 - hosts: localhost
   connection: local
   gather_facts: no
-  vars:
-    csr_public_ip_address:
   vars_files:
     - ./cloud_vars.yml
-  
-  tasks:      
 
-      # Since we are not using the ansble module to start the CSR, we need to check
-      # first to maintain the idempotency
-    - name: See if the CSR is already there
-      os_server_facts:
-      register: server_facts
-
-    - commend: echo 
-      with_items: '{{ hostvars[inventory_hostname]["openstack_servers"].human_id }}'
-      when: item["networks"][cloud_tag] is defined
-
-#    - debug: var=hostvars[inventory_hostname]
-
-    - name: Get the Public IP Address
-      set_fact:
-        csr_public_ip_address: '{{ hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0]["addresses"][openstack_shared_network_name][1].addr if hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0]["addresses"][openstack_shared_network_name][1] is defined else "none" }}'
-      
-             
-#    - name: Delete the tenant subnet
-#      os_subnet:
-#        state: absent
-#        network_name: '{{ cloud_tag }}'
-
-#    - name: Delete the tenant network
-#      os_network:
-#        state: absent
-#        name: '{{ cloud_tag }}'
-
-#    - name: Delete security group
-#      os_security_group:
-#        state: absent
-#        name: '{{ cloud_tag }}'
-
-
-
-
+  tasks:    
+    - name: Delete the tenant subnet
+      os_subnet:
+        state: absent
+        name: '{{ cloud_tag }}'
         
+    - name: Delete the tenant network
+      os_network:
+        state: absent
+        shared: false
+        name: '{{ cloud_tag }}'
+        
+    - name: Delete the Private Key 
+      os_keypair:
+        state: absent
+        name: '{{ cloud_tag }}_key'
+        
+    - name: Delete security group
+      os_security_group:
+        state: absent
+        name: '{{ cloud_tag }}'

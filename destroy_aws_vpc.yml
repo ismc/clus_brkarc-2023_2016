@@ -1,5 +1,5 @@
 ---
-- hosts: aws:hosts 
+- hosts: spokes:hosts 
   gather_facts: no
   connection: local
   vars_files:

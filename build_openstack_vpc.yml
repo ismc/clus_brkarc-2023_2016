@@ -27,13 +27,13 @@
         state: present
         network_name: '{{ cloud_tag }}'
         name: '{{ cloud_tag }}'
-        cidr: 10.30.1.0/24
+        cidr: '{{ cloud_info["openstack"].inside_cidr }}'
         dns_nameservers:
           - '{{ dns_server1 }}'
           - '{{ dns_server2 }}'
         host_routes:
           - destination: 0.0.0.0/0
-            nexthop: 10.30.1.254
+            nexthop: '{{ cloud_info["openstack"].csr_inside_ip }}'
       register: tenant_subnet 
 
     - name: Create security group
@@ -80,14 +80,14 @@
         network: '{{ tenant_network.id }}'
         no_security_groups:
         fixed_ips:
-        - ip_address: 10.30.1.254
+        - ip_address: '{{ cloud_info["openstack"].csr_inside_ip }}'
       register: csr_inside_port
 
     - name: Add outside network port
       os_port:
         state: present
         name: '{{ cloud_tag }}_outside_port'
-        network: '{{ openstack_shared_network }}'
+        network: '{{ cloud_info["openstack"].shared_network }}'
         security_groups: '{{ cloud_tag }}'
       register: csr_outside_port
 
@@ -97,7 +97,7 @@
 
     - name: Get the Shared Network Name
       os_networks_facts:
-        name:  '{{ openstack_shared_network }}'
+        name:  '{{ cloud_info["openstack"].shared_network }}'
       register: shared_network_facts
     
     - name: Set the Shared Network Name
@@ -118,7 +118,7 @@
 #      local_action: lineinfile dest=iosxe_config.txt regexp="key-string" insertafter="username cloud" line="key-string {{ ssh_public_key }}" state=present
           
     - name: Create the CSR
-      shell: nova boot {{ cloud_tag }}_csr --image {{ openstack_csr_image }} --flavor {{ openstack_csr_flavor }} --nic port-id={{ csr_outside_port.port.id }} --nic port-id={{ csr_inside_port.port.id }} --config-drive=true --file iosxe_config.txt=./iosxe_config.txt --security-groups {{ cloud_tag }} --key_name {{ cloud_tag }}_key
+      shell: nova boot {{ cloud_tag }}_csr --image {{ cloud_info["openstack"].csr_image }} --flavor {{ cloud_info["openstack"].csr_flavor }} --nic port-id={{ csr_outside_port.port.id }} --nic port-id={{ csr_inside_port.port.id }} --config-drive=true --file iosxe_config.txt=./iosxe_config.txt --security-groups {{ cloud_tag }} --key_name {{ cloud_tag }}_key
       args:
         executable: /bin/bash
       when: hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0] is not defined
@@ -140,8 +140,9 @@
       os_floating_ip:
         state: present
         reuse: yes
-        fixed_address: "{{ csr_outside_private_ip }}"
-        network: '{{ openstack_external_network }}'
+        fixed_address: '{{ csr_outside_private_ip }}'
+        floating_ip_address: '{{ cloud_info["openstack"].csr_public_ip }}'
+        network: '{{ cloud_info["openstack"].external_network }}'
         server: '{{ cloud_tag }}_csr'
         wait: true
         timeout: 180
@@ -154,12 +155,12 @@
         server: '{{ cloud_tag }}_csr'
       register: csr_facts
 
-    - name: Get the Public IP Address
+    - name: Set the Public IP Address
       set_fact:
         csr_outside_public_ip: '{{ hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0]["addresses"][shared_network_name][1].addr if hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0]["addresses"][shared_network_name][1] is defined else "none" }}'
 
     - name: Add CSR to local host group
-      local_action: lineinfile dest=hosts regexp="{{ hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0].id }}" insertafter="\[openstack\]" line="{{ csr_outside_public_ip }} csr_outside_private_ip={{ csr_outside_private_ip }} name={{ cloud_tag }}_csr id={{ hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0].id }}" state=present
+      local_action: lineinfile dest=hosts regexp="{{ cloud_tag }}_csr" insertafter="\[hubs\]" line="{{ csr_outside_public_ip }} csr_outside_private_ip={{ csr_outside_private_ip }} name={{ cloud_tag }}_csr id={{ hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0].id }} cloud=openstack" state=present
       when: csr_outside_public_ip != "none"
 
     - name: Create Login Server
@@ -174,10 +175,10 @@
           - net-id: '{{ csr_inside_port.port.network_id }}'
       register: login_server_facts
 
+#    - debug: var=hostvars[inventory_hostname]
+    
     - name: Add instance to local host group
-      local_action: lineinfile dest=hosts regexp="{{ hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0].id }}" insertafter="\[openstack\]" line="{{ csr_outside_public_ip }} csr_outside_private_ip={{ csr_outside_private_ip }} name={{ cloud_tag }}_csr id={{ hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0].id }}" state=present
-     
-    - debug: var=hostvars[inventory_hostname]
+      local_action: lineinfile dest=hosts regexp="{{ cloud_tag }}_login" insertafter="\[hosts\]" line="{{ hostvars[inventory_hostname]["login_server_facts"]["openstack"].interface_ip }} name={{ cloud_tag }}_login id={{ hostvars[inventory_hostname]["login_server_facts"].id }} cloud=openstack" state=present
 
     - name: Waiting for CSR to finish booting
       local_action: wait_for port=22 host="{{ csr_outside_public_ip }}" timeout=600
