@@ -154,16 +154,17 @@
       register: csr_inside_interface
       when: hostvars[inventory_hostname]["csr_inside_interface_facts"]["interfaces"][0] is not defined
 
-    - debug: var=hostvars[inventory_hostname]
+#    - debug: var=hostvars[inventory_hostname]
 
     - name: Set the CSR inside interface ID
       set_fact:
-        csr_inside_eni: '{{ hostvars[inventory_hostname]["csr_inside_interface"]["interfaces"][0].id if csr_inside_interface.changed else hostvars[inventory_hostname]["csr_inside_interface_facts"]["interfaces"][0].id }}'
+        csr_inside_eni: '{{ hostvars[inventory_hostname]["csr_inside_interface"]["interface"].id if csr_inside_interface.changed else hostvars[inventory_hostname]["csr_inside_interface_facts"]["interfaces"][0].id }}'
 
     - name: Disable Source/Dest check on the inside interface
       ec2_eni:
         eni_id: '{{ csr_inside_eni }}'
         region: '{{ cloud_info["aws"].region }}'
+        subnet_id: '{{ inside_subnet.subnet.id }}'
         source_dest_check: false
         state: present
 
@@ -181,7 +182,6 @@
           - dest: 0.0.0.0/0
             interface_id: '{{ csr_inside_eni }}'
       register: private_route_table       
-#      when: csr_inside_interface.changed
 
     - name: Create login instance
       ec2:
