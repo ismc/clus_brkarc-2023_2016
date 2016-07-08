@@ -1,5 +1,9 @@
 # build-a-cloud
 
+This repository contains a set of Ansible playbooks that set up VPCs (or their equivalents)
+in AWS, Azure, and OpenStack.  In addition, it connects them together using a DMVPN overlay
+using a Cisco Cloud Services Router 1000v.
+
 ## Pre-requisites:
 
 ### Install PIP on Centos 7:
@@ -49,6 +53,8 @@ npm install azure-cli -g
 
 ```
 ansible-playbook build_aws_vpc.yml
+
+ansible-playbook -i hosts configure_csrs.yml
 
 ansible-playbook -i hosts destroy_aws_vpc.yml
 ```
