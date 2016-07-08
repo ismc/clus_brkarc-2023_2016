@@ -1,0 +1,36 @@
+---
+- hosts: aws:hosts 
+  gather_facts: no
+  connection: local
+  vars_files:
+    - ./cloud_vars.yml
+    
+  tasks:
+    - name: Terminate instances that were previously launched
+      ec2:
+        state: 'absent'
+        region: '{{ aws_region }}'
+        instance_ids: '{{ id }}'
+      when: cloud == 'aws'
+
+  tasks:
+    - name: Create VPC
+      ec2_vpc:
+        state: absent
+        cidr_block: '{{ aws_vpc_cidr }}'
+        resource_tags:
+          Name: '{{ cloud_tag }}'
+          Environment: '{{ cloud_tag }}'
+        region: '{{ aws_region }}'
+        dns_hostnames: no
+        dns_support: yes
+        instance_tenancy: default
+        internet_gateway: True
+      register: vpc  
+      
+    - name: Create the ssh key pair
+      ec2_key:
+        name: '{{ cloud_tag }}_key'
+        region: '{{ aws_region }}'
+        key_material: '{{ ssh_public_key }}'
+        state: absent
