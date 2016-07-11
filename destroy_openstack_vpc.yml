@@ -9,11 +9,11 @@
     - name: Terminate instances that were previously launched
       os_server:
         state: absent
-        name: '{{ name }}'
+        name: '{{ id }}'
       when: cloud == 'openstack'
     
     - name: Remove instance from the host file
-      local_action: lineinfile dest=hosts regexp="{{ name }}" state=absent
+      local_action: lineinfile dest=hosts regexp="{{ id }}" state=absent
       when: cloud == 'openstack'
 
 - hosts: localhost

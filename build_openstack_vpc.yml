@@ -80,7 +80,9 @@
         network: '{{ tenant_network.id }}'
         no_security_groups:
         fixed_ips:
-        - ip_address: '{{ cloud_info["openstack"].csr_inside_ip }}'
+          - ip_address: '{{ cloud_info["openstack"].csr_inside_ip }}'
+        allowed_address_pairs:
+          - ip_address: 10.0.0.0/8
       register: csr_inside_port
 
     - name: Add outside network port
@@ -160,7 +162,7 @@
         csr_outside_public_ip: '{{ hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0]["addresses"][shared_network_name][1].addr if hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0]["addresses"][shared_network_name][1] is defined else "none" }}'
 
     - name: Add CSR to local host group
-      local_action: lineinfile dest=hosts regexp="{{ cloud_tag }}_csr" insertafter="\[hubs\]" line="{{ csr_outside_public_ip }} csr_outside_private_ip={{ csr_outside_private_ip }} name={{ cloud_tag }}_csr id={{ hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0].id }} cloud=openstack" state=present
+      local_action: lineinfile dest=hosts regexp="hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0].id" insertafter="\[hubs\]" line="{{ csr_outside_public_ip }} csr_outside_private_ip={{ csr_outside_private_ip }} name={{ cloud_tag }}_csr id={{ hostvars[inventory_hostname]["csr_facts"]["ansible_facts"]["openstack_servers"][0].id }} cloud=openstack" state=present
       when: csr_outside_public_ip != "none"
 
     - name: Create Login Server
@@ -178,7 +180,7 @@
 #    - debug: var=hostvars[inventory_hostname]
     
     - name: Add instance to local host group
-      local_action: lineinfile dest=hosts regexp="{{ cloud_tag }}_login" insertafter="\[hosts\]" line="{{ hostvars[inventory_hostname]["login_server_facts"]["openstack"].interface_ip }} name={{ cloud_tag }}_login id={{ hostvars[inventory_hostname]["login_server_facts"].id }} cloud=openstack" state=present
+      local_action: lineinfile dest=hosts regexp="hostvars[inventory_hostname]["login_server_facts"].id" insertafter="\[hosts\]" line="{{ hostvars[inventory_hostname]["login_server_facts"]["openstack"].interface_ip }} name={{ cloud_tag }}_login id={{ hostvars[inventory_hostname]["login_server_facts"].id }} cloud=openstack" state=present
 
     - name: Waiting for CSR to finish booting
       local_action: wait_for port=22 host="{{ csr_outside_public_ip }}" timeout=600

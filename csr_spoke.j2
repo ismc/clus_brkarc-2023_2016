@@ -13,12 +13,17 @@ crypto ipsec transform-set xform esp-aes 256 esp-sha256-hmac
 crypto ipsec profile ipsec-prof
  set transform-set xform
 !
+interface GigabitEthernet2
+ no ip dhcp client request router
+ ip address dhcp
+ no shut
+!
 interface Tunnel0
  ip address {{ dmvpn_tunnel_address }} {{ dmvpn_tunnel_mask }}
  no ip redirects
  ip mtu 1400
  ip nhrp network-id 1
- ip nhrp nhs 172.24.0.1 nbma 199.66.189.93 multicast
+ ip nhrp nhs 172.24.0.1 nbma {{ cloud_info["openstack"].csr_public_ip }} multicast
  ip nhrp shortcut
  ip tcp adjust-mss 1360
  tunnel source GigabitEthernet1

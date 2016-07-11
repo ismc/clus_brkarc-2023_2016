@@ -119,7 +119,7 @@
         csr_outside_public_ip: '{{ hostvars[inventory_hostname]["csr"]["tagged_instances"][0].public_ip if hostvars[inventory_hostname]["csr"]["tagged_instances"][0] is defined else "none" }}'
 
     - name: Add CSR to local host group
-      local_action: lineinfile dest=hosts regexp="{{ csr_outside_public_ip }}" insertafter="\[spokes\]" line="{{ csr_outside_public_ip }} csr_outside_private_ip={{ csr_outside_private_ip }} id={{ csr_instance_id }} cloud=aws" state=present
+      local_action: lineinfile dest=hosts regexp="{{ csr_instance_id }}" insertafter="\[spokes\]" line="{{ csr_outside_public_ip }} csr_outside_private_ip={{ csr_outside_private_ip }} id={{ csr_instance_id }} cloud=aws" state=present
       when: csr_outside_public_ip != "none"
 
     - name: Create Inside subnet
@@ -185,12 +185,12 @@
       ec2:
         key_name: '{{ cloud_tag }}_key'
         region: '{{ cloud_info["aws"].region }}'
-        instance_type: '{{ cloud_info["aws"].login_ami }}'
+        instance_type: '{{ cloud_info["aws"].host_type }}'
         instance_tags:
           Name: '{{ cloud_tag }}_login'
           Environment: '{{ cloud_tag }}'
           Role: '{{ cloud_tag }}_login'
-        image: '{{ cloud_info["aws"].login_ami }}'
+        image: '{{ cloud_info["aws"].host_ami }}'
         group_id: '{{ csr_security_group.group_id }}'
         exact_count: 1
         count_tag:
@@ -202,9 +202,10 @@
       register: login_server
 
     - name: Add Login Server to local host group
-      local_action: lineinfile dest=hosts regexp="{{ hostvars[inventory_hostname]["login_server"]["tagged_instances"][0].private_ip }}" insertafter="\[hosts\]" line="{{ hostvars[inventory_hostname]["login_server"]["tagged_instances"][0].private_ip }} name={{ cloud_tag }}_login id={{ hostvars[inventory_hostname]["login_server"]["tagged_instances"][0].id }} cloud=aws" state=present
+      local_action: lineinfile dest=hosts regexp="{{ hostvars[inventory_hostname]["login_server"]["tagged_instances"][0].id }}" insertafter="\[hosts\]" line="{{ hostvars[inventory_hostname]["login_server"]["tagged_instances"][0].private_ip }} name={{ cloud_tag }}_login id={{ hostvars[inventory_hostname]["login_server"]["tagged_instances"][0].id }} cloud=aws" state=present
       when: csr_outside_public_ip != "none"
 
-      
+    - name: Waiting for CSR to finish booting
+      local_action: wait_for port=22 host="{{ csr_outside_public_ip }}" timeout=600 delay=300   
 
 #    - debug: var=hostvars[inventory_hostname]
